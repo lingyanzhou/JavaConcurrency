@@ -6,10 +6,24 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * @Description: synchronized 块
+ *   - 偏向锁: JVM比较锁对象头里的thread id信息
+ *   - 轻量级锁: 等待的线程自旋, 而不是阻塞
+ *   - 重量级锁: 等待的线程被阻塞
+ *
+ * @author: lingy
+ * @Date: 2019-07-01 10:49:57
+ * @param: null
+ * @return:
+ */
 public class SynchronizedBlockTests {
     public static class ConcurrentCounter {
         private static int curId = 0;
@@ -183,6 +197,141 @@ public class SynchronizedBlockTests {
         Assert.assertEquals(expected, ConcurrentCounter.getCurId());
         for (int i=0; i<expected; ++i) {
             Assert.assertEquals(expected2, concurrentCounter[i].getCount());
+        }
+    }
+
+    /**
+     * @Description: 简单非重入锁, 使用sync块实现
+     *   - wait: 在该对象的synchronized 同步代码块里使用, 使当前线程阻塞，前提是必须先获得锁
+     *   - notify: 在该对象的synchronized 同步代码块里使用, 只唤醒一个等待的线程
+     *   - notifyAll: 在该对象的synchronized 同步代码块里使用, 唤醒所有等待的线程
+     * @author: lingy
+     * @Date: 2019-07-01 14:41:32
+     */
+    private static class SimpleLock {
+        @Getter
+        private Object lock = new Object();
+        private boolean locked = false;
+        public void acquire() {
+            synchronized (lock) {
+                while (locked) {
+                    try {
+                        lock.wait();
+                        locked = true;
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+
+        public void release() {
+            synchronized (lock) {
+                locked = false;
+                lock.notifyAll();
+            }
+        }
+    }
+
+    @Test
+    public void testSimpleLock() throws InterruptedException {
+        SimpleLock simpleLock = new SimpleLock();
+        Runnable runnable = () -> {
+            for (int i=0; i<100; ++i) {
+                simpleLock.acquire();
+                try {
+                    Thread.sleep(new Random().nextInt(10));
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                simpleLock.release();
+            }
+        };
+
+        ExecutorService executorService = Executors.newFixedThreadPool(10);
+        for (int i=0; i<10; ++i) {
+            executorService.execute(runnable);
+        }
+
+        executorService.shutdown();
+        boolean normalTerm = executorService.awaitTermination(100, TimeUnit.SECONDS);
+        Assert.assertTrue(normalTerm);
+    }
+
+    /**
+     * @Description: 简单条件变量, 使用sync块实现
+     *   - wait: 在该对象的synchronized 同步代码块里使用, 使当前线程阻塞
+     *   - notify: 在该对象的synchronized 同步代码块里使用, 只唤醒一个等待的线程
+     *   - notifyAll: 在该对象的synchronized 同步代码块里使用, 唤醒所有等待的线程
+     * @author: lingy
+     * @Date: 2019-07-01 14:41:32
+     */
+    private static class SimpleCondition {
+        private SimpleLock lock;
+
+        public SimpleCondition(SimpleLock lock) {
+            this.lock = lock;
+        }
+
+        public void await() {
+            synchronized (lock.lock) {
+                try {
+                    lock.lock.wait();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        public void signalAll() {
+            synchronized (lock.lock) {
+                lock.lock.notifyAll();
+            }
+        }
+    }
+
+    @Test
+    public void testSimpleCondition() throws InterruptedException {
+        SimpleLock simpleLock = new SimpleLock();
+        SimpleCondition fullCondition = new SimpleCondition(simpleLock);
+        SimpleCondition emptyCondition = new SimpleCondition(simpleLock);
+        Queue<Long> buff = new LinkedList<>();
+        Queue<Long> result = new LinkedList<>();
+        final int BUFF_SIZE = 10;
+        Runnable producer = () -> {
+            for (int i=0; i<100; ++i) {
+                simpleLock.acquire();
+                if (buff.size()==BUFF_SIZE) {
+                    fullCondition.await();
+                }
+                buff.offer((long) i);
+                System.out.println("Producer: Value = "+i);
+                emptyCondition.signalAll();
+                simpleLock.release();
+            }
+        };
+        Runnable consumer = () -> {
+            for (int i=0; i<100; ++i) {
+                simpleLock.acquire();
+                if (buff.size()==0) {
+                    emptyCondition.await();
+                }
+                System.out.println("Consumer: Value = "+i);
+                result.offer(buff.poll());
+                fullCondition.signalAll();
+                simpleLock.release();
+            }
+        };
+
+        ExecutorService executorService = Executors.newFixedThreadPool(10);
+        executorService.execute(producer);
+        executorService.execute(consumer);
+
+        executorService.shutdown();
+        executorService.awaitTermination(10, TimeUnit.SECONDS);
+        final int resultSize = result.size();
+        for (int i=0; i<resultSize; ++i) {
+            Assert.assertEquals(i, result.poll().longValue());
         }
     }
 }

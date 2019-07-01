@@ -54,7 +54,7 @@ public class VolatileTests {
         Runnable printOdd = () -> {
             for (int i=0; i<10; ++i) {
                 lock.lock(ODD);
-                System.out.println("ODD: i = "+(i*2+1));
+                System.out.println("ODD: Value = "+(i*2+1));
                 orderList.add(i*2+1);
                 lock.unlock(ODD);
             }
@@ -62,7 +62,7 @@ public class VolatileTests {
         Runnable printEven = () -> {
             for (int i=0; i<10; ++i) {
                 lock.lock(EVEN);
-                System.out.println("EVEN: i = "+i*2);
+                System.out.println("EVEN: Value = "+i*2);
                 orderList.add(i*2);
                 lock.unlock(EVEN);
             }
