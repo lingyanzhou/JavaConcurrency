@@ -522,6 +522,7 @@ public class SynchronizedBlockTests {
         }
         executorService.shutdown();
         boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
 
         int readers = 0;
         int writers = 0;

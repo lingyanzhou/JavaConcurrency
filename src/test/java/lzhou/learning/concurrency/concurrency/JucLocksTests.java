@@ -9,6 +9,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class JucLocksTests {
     private long value = 0;
@@ -100,5 +103,78 @@ public class JucLocksTests {
             long tmp = result.poll().longValue();
             Assert.assertEquals(i, tmp);
         }
+    }
+
+    @Test
+    public void testReadWriteLock() throws InterruptedException {
+        final int READER_ENTER = 0;
+        final int READER_EXIT = 1;
+        final int WRITER_ENTER = 2;
+        final int WRITER_EXIT = 3;
+
+        ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+        Queue<Integer> readerWriterCallOrder = new LinkedList();
+        Runnable reader = () -> {
+            for (int i=0; i<1000; ++i) {
+                readWriteLock.readLock().lock();
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(READER_ENTER);
+                }
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(READER_EXIT);
+                }
+                readWriteLock.readLock().unlock();
+            }
+        };
+        Runnable writer = () -> {
+            for (int i=0; i<1000; ++i) {
+                readWriteLock.writeLock().lock();
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(WRITER_ENTER);
+                }
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(WRITER_EXIT);
+                }
+                readWriteLock.writeLock().unlock();
+            }
+        };
+
+        ExecutorService executorService = Executors.newFixedThreadPool(40);
+        for (int i=0; i<20; ++i) {
+            executorService.execute(writer);
+        }
+        for (int i=0; i<20; ++i) {
+            executorService.execute(reader);
+        }
+        executorService.shutdown();
+        boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
+
+        int readers = 0;
+        int writers = 0;
+        int maxReaders = 0;
+        while (readerWriterCallOrder.size()>0) {
+            int action = readerWriterCallOrder.poll();
+            if (action==READER_ENTER) {
+                Assert.assertEquals(0, writers);
+                readers += 1;
+            } else if (action==READER_EXIT) {
+                Assert.assertEquals(0, writers);
+                Assert.assertTrue(readers > 0);
+                readers -= 1;
+            } else if (action==WRITER_ENTER) {
+                Assert.assertEquals(0, writers);
+                Assert.assertEquals(0, readers);
+                writers += 1;
+            } else if (action==WRITER_EXIT) {
+                Assert.assertEquals(1, writers);
+                Assert.assertEquals(0, readers);
+                writers -= 1;
+            }
+            maxReaders = Math.max(maxReaders, readers);
+        }
+
+        System.out.println("MaxReaders = " + maxReaders);
+        Assert.assertTrue(maxReaders>=1);
     }
 }
