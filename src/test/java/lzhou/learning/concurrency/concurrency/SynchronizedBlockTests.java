@@ -6,9 +6,9 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.LinkedList;
-import java.util.Queue;
-import java.util.Random;
+import javax.xml.crypto.dsig.SignatureMethod;
+import java.util.*;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -433,5 +433,121 @@ public class SynchronizedBlockTests {
         for (int i=0; i<resultSize; ++i) {
             Assert.assertEquals(i, result.poll().longValue());
         }
+    }
+
+    private static class SimpleReadWriteLock {
+        private Object lock = new Object();
+        private int readers = 0;
+        private int writers = 0;
+
+        public void acquireReadLock() {
+            synchronized (lock) {
+                while (writers > 0) {
+                    try {
+                        lock.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                readers += 1;
+            }
+        }
+
+        public void releaseReadLock() {
+            synchronized (lock) {
+                readers -= 1;
+            }
+        }
+
+        public void acquireWriteLock() {
+            synchronized (lock) {
+                while (readers > 0 || writers> 0) {
+                    try {
+                        lock.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                writers += 1;
+            }
+        }
+
+        public void releaseWriteLock() {
+            synchronized (lock) {
+                writers -= 1;
+            }
+        }
+    }
+
+    @Test
+    public void testSimpleReadWriteLock() throws InterruptedException {
+        final int READER_ENTER = 0;
+        final int READER_EXIT = 1;
+        final int WRITER_ENTER = 2;
+        final int WRITER_EXIT = 3;
+
+        SimpleReadWriteLock simpleReadWriteLock = new SimpleReadWriteLock();
+        Queue<Integer> readerWriterCallOrder = new LinkedList();
+        Runnable reader = () -> {
+            for (int i=0; i<1000; ++i) {
+                simpleReadWriteLock.acquireReadLock();
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(READER_ENTER);
+                }
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(READER_EXIT);
+                }
+                simpleReadWriteLock.releaseReadLock();
+            }
+        };
+        Runnable writer = () -> {
+            for (int i=0; i<1000; ++i) {
+                simpleReadWriteLock.acquireWriteLock();
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(WRITER_ENTER);
+                }
+                synchronized (readerWriterCallOrder) {
+                    readerWriterCallOrder.offer(WRITER_EXIT);
+                }
+                simpleReadWriteLock.releaseWriteLock();
+            }
+        };
+
+        ExecutorService executorService = Executors.newFixedThreadPool(40);
+        for (int i=0; i<20; ++i) {
+            executorService.execute(writer);
+        }
+        for (int i=0; i<20; ++i) {
+            executorService.execute(reader);
+        }
+        executorService.shutdown();
+        boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+
+        int readers = 0;
+        int writers = 0;
+        int maxReaders = 0;
+        while (readerWriterCallOrder.size()>0) {
+            int action = readerWriterCallOrder.poll();
+            if (action==READER_ENTER) {
+                Assert.assertEquals(0, writers);
+                readers += 1;
+            } else if (action==READER_EXIT) {
+                Assert.assertEquals(0, writers);
+                Assert.assertTrue(readers > 0);
+                readers -= 1;
+            } else if (action==WRITER_ENTER) {
+                Assert.assertEquals(0, writers);
+                Assert.assertEquals(0, readers);
+                writers += 1;
+            } else if (action==WRITER_EXIT) {
+                Assert.assertEquals(1, writers);
+                Assert.assertEquals(0, readers);
+                writers -= 1;
+            }
+            maxReaders = Math.max(maxReaders, readers);
+        }
+
+        System.out.println("MaxReaders = " + maxReaders);
+        Assert.assertTrue(maxReaders>=1);
     }
 }
