@@ -217,11 +217,11 @@ public class SynchronizedBlockTests {
                 while (locked) {
                     try {
                         lock.wait();
-                        locked = true;
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
                 }
+                locked = true;
             }
         }
 
@@ -236,14 +236,17 @@ public class SynchronizedBlockTests {
     @Test
     public void testSimpleLock() throws InterruptedException {
         SimpleLock simpleLock = new SimpleLock();
+        Queue<String> result = new LinkedList<>();
         Runnable runnable = () -> {
             for (int i=0; i<100; ++i) {
                 simpleLock.acquire();
+                result.offer(Thread.currentThread().getName());
                 try {
                     Thread.sleep(new Random().nextInt(10));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
+                result.offer(Thread.currentThread().getName());
                 simpleLock.release();
             }
         };
@@ -256,13 +259,15 @@ public class SynchronizedBlockTests {
         executorService.shutdown();
         boolean normalTerm = executorService.awaitTermination(100, TimeUnit.SECONDS);
         Assert.assertTrue(normalTerm);
+        Assert.assertTrue(result.size() % 2 == 0);
+        final int pairs = result.size() / 2;
+        for (int i=0; i<pairs; ++i) {
+            Assert.assertEquals(result.poll(), result.poll());
+        }
     }
 
     /**
      * @Description: 简单条件变量, 使用sync块实现
-     *   - wait: 在该对象的synchronized 同步代码块里使用, 使当前线程阻塞
-     *   - notify: 在该对象的synchronized 同步代码块里使用, 只唤醒一个等待的线程
-     *   - notifyAll: 在该对象的synchronized 同步代码块里使用, 唤醒所有等待的线程
      * @author: lingy
      * @Date: 2019-07-01 14:41:32
      */
@@ -275,11 +280,17 @@ public class SynchronizedBlockTests {
 
         public void await() {
             synchronized (lock.lock) {
-                try {
-                    lock.lock.wait();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                lock.release();
+                boolean notified = false;
+                while (!notified) {
+                    try {
+                        lock.lock.wait();
+                        notified = true;
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
+                lock.acquire();
             }
         }
 
@@ -293,16 +304,17 @@ public class SynchronizedBlockTests {
     @Test
     public void testSimpleCondition() throws InterruptedException {
         SimpleLock simpleLock = new SimpleLock();
-        SimpleCondition fullCondition = new SimpleCondition(simpleLock);
+        SimpleCondition filledCondition = new SimpleCondition(simpleLock);
         SimpleCondition emptyCondition = new SimpleCondition(simpleLock);
         Queue<Long> buff = new LinkedList<>();
         Queue<Long> result = new LinkedList<>();
         final int BUFF_SIZE = 10;
         Runnable producer = () -> {
-            for (int i=0; i<100; ++i) {
+            for (int i=0; i<1000; ++i) {
                 simpleLock.acquire();
-                if (buff.size()==BUFF_SIZE) {
-                    fullCondition.await();
+                while (buff.size()==BUFF_SIZE) {
+                    System.out.println("Producer: Waiting");
+                    filledCondition.await();
                 }
                 buff.offer((long) i);
                 System.out.println("Producer: Value = "+i);
@@ -311,15 +323,103 @@ public class SynchronizedBlockTests {
             }
         };
         Runnable consumer = () -> {
-            for (int i=0; i<100; ++i) {
+            for (int i=0; i<1000; ++i) {
                 simpleLock.acquire();
-                if (buff.size()==0) {
+                while (buff.size()==0) {
+                    System.out.println("Producer: Waiting");
                     emptyCondition.await();
                 }
-                System.out.println("Consumer: Value = "+i);
-                result.offer(buff.poll());
-                fullCondition.signalAll();
+                System.out.println(buff.size());
+                long tmp = buff.poll();
+                result.offer(tmp);
+                System.out.println("Consumer: Value = "+tmp);
+                filledCondition.signalAll();
                 simpleLock.release();
+            }
+        };
+
+        ExecutorService executorService = Executors.newFixedThreadPool(10);
+        executorService.execute(producer);
+        executorService.execute(consumer);
+        executorService.shutdown();
+        boolean normalExit = executorService.awaitTermination(2, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
+        final int resultSize = result.size();
+        for (int i=0; i<resultSize; ++i) {
+            Assert.assertEquals(i, result.poll().longValue());
+        }
+    }
+
+    /**
+     * @Description: 简单信号量, 以sync block, wait/notify实现
+     * @author: lingy
+     * @Date: 2019-07-01 14:41:32
+     */
+    private static class SimpleSemaphore {
+        private SimpleLock lock = new SimpleLock();
+        private int permits;
+
+        public SimpleSemaphore(int permits) {
+            this.permits = permits;
+        }
+
+        public void acquire() {
+            synchronized (lock.lock) {
+                while (this.permits == 0) {
+                    try {
+                        lock.lock.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                this.permits -= 1;
+            }
+        }
+
+        public void release() {
+            synchronized (lock.lock) {
+                this.permits += 1;
+                lock.lock.notifyAll();
+            }
+        }
+
+        public int acquireAll() {
+            synchronized (lock.lock) {
+                int tmp = this.permits;
+                this.permits = 0;
+                return tmp;
+            }
+        }
+    }
+
+    @Test
+    public void testSimpleSemaphore() throws InterruptedException {
+        final int BUFF_SIZE = 10;
+        SimpleSemaphore mutex = new SimpleSemaphore(1);
+        SimpleSemaphore filledSemaphore = new SimpleSemaphore(BUFF_SIZE);
+        filledSemaphore.acquireAll();
+        SimpleSemaphore emptyCondition = new SimpleSemaphore(BUFF_SIZE);
+        Queue<Long> buff = new LinkedList<>();
+        Queue<Long> result = new LinkedList<>();
+        Runnable producer = () -> {
+            for (int i=0; i<1000; ++i) {
+                emptyCondition.acquire();
+                mutex.acquire();
+                buff.offer((long) i);
+                System.out.println("Producer: Value = "+i);
+                filledSemaphore.release();
+                mutex.release();
+            }
+        };
+        Runnable consumer = () -> {
+            for (int i=0; i<1000; ++i) {
+                filledSemaphore.acquire();
+                mutex.acquire();
+                long tmp = buff.poll();
+                result.offer(tmp);
+                System.out.println("Consumer: Value = "+tmp);
+                emptyCondition.release();
+                mutex.release();
             }
         };
 
