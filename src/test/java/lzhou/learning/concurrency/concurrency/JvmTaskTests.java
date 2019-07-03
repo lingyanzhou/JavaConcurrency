@@ -23,7 +23,7 @@ public class JvmTaskTests {
      * @return:
      */
     private static Thread[] makeThreads(int nthread, int sleep) {
-        Thread threads[] = new Thread[nthread];
+        Thread[] threads = new Thread[nthread];
         for (int i=0; i<nthread; ++i) {
             int ii = i;
             threads[i] = new Thread() {
@@ -47,7 +47,7 @@ public class JvmTaskTests {
         final int sleep = 1000;
         final long timeConsumedMax = 1200;
         long startTime = System.currentTimeMillis();
-        Thread threads[] = makeThreads(nthread, sleep);
+        Thread[] threads = makeThreads(nthread, sleep);
         for (int i=0; i<nthread; ++i) {
             threads[i].start();
         }
@@ -69,7 +69,7 @@ public class JvmTaskTests {
      * @return:
      */
     private static Runnable[] makeRunnables(int nthread, int sleep) {
-        Runnable runnables[] = new Runnable[nthread];
+        Runnable[] runnables = new Runnable[nthread];
         for (int i=0; i<nthread; ++i) {
             int ii = i;
             runnables[i] = new Runnable() {
@@ -94,8 +94,8 @@ public class JvmTaskTests {
         final int sleep = 1000;
         final long timeConsumedMax = 1200;
         long startTime = System.currentTimeMillis();
-        Runnable runnables[] = makeRunnables(nthread, sleep);
-        Thread threads[] = new Thread[nthread];
+        Runnable[] runnables = makeRunnables(nthread, sleep);
+        Thread[] threads = new Thread[nthread];
         for (int i=0; i<nthread; ++i) {
             threads[i] = new Thread(runnables[i]);
         }

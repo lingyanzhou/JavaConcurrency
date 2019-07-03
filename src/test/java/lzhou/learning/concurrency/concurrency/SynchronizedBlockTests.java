@@ -162,8 +162,8 @@ public class SynchronizedBlockTests {
             });
         }
         executorService.shutdown();
-        // 注意, 下面一个竞争条件. 但我们忽略.
-        executorService.awaitTermination( 10, TimeUnit.SECONDS);
+        boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
 
         Assert.assertEquals(expected, ConcurrentCounter.getCurId());
     }
@@ -175,28 +175,30 @@ public class SynchronizedBlockTests {
         final int nthreads = 20;
 
         ExecutorService executorService = Executors.newFixedThreadPool(nthreads);
-        ConcurrentCounter concurrentCounter[] = new ConcurrentCounter[expected];
+        ConcurrentCounter[] concurrentCounters = new ConcurrentCounter[expected];
 
         for (int i=0; i<expected; ++i) {
             int ii = i;
             executorService.execute(() -> {
-                concurrentCounter[ii] = ConcurrentCounter.getInstance();
+                concurrentCounters[ii] = ConcurrentCounter.getInstance();
                 // 注意, ii 和 id 不一定一致, 因为Runnable不一定按顺序执行
-                System.out.println("i = "+ ii + "; id= " + concurrentCounter[ii].getId());
+                System.out.println("i = "+ ii + "; id= " + concurrentCounters[ii].getId());
                 for (int j=0; j<expected2; ++j) {
                     int jj = j;
-                    concurrentCounter[ii].incr1();
+                    concurrentCounters[ii].incr1();
                     // 注意, ii 和 id, jj 和 counter 不一定一致, 因为Runnable不一定按顺序执行
-                    System.out.println("i = "+ ii + "; id= " + concurrentCounter[ii].getId()+"; j = "+ jj + "; count= " + concurrentCounter[ii].getCount());
+                    System.out.println("i = "+ ii + "; id= " + concurrentCounters[ii].getId()+"; j = "+ jj + "; count= " + concurrentCounters[ii].getCount());
                 }
             });
         }
         executorService.shutdown();
-        // 注意, 下面一个竞争条件. 但我们忽略.
-        executorService.awaitTermination( 10, TimeUnit.SECONDS);
+
+        boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
+
         Assert.assertEquals(expected, ConcurrentCounter.getCurId());
         for (int i=0; i<expected; ++i) {
-            Assert.assertEquals(expected2, concurrentCounter[i].getCount());
+            Assert.assertEquals(expected2, concurrentCounters[i].getCount());
         }
     }
 
@@ -302,7 +304,7 @@ public class SynchronizedBlockTests {
     }
 
     @Test
-    public void testSimpleCondition() throws InterruptedException {
+    public void testProducerConsumerWithSimpleCondition() throws InterruptedException {
         SimpleLock simpleLock = new SimpleLock();
         SimpleCondition filledCondition = new SimpleCondition(simpleLock);
         SimpleCondition emptyCondition = new SimpleCondition(simpleLock);
@@ -393,7 +395,7 @@ public class SynchronizedBlockTests {
     }
 
     @Test
-    public void testSimpleSemaphore() throws InterruptedException {
+    public void testProducerConsumerWithSimpleSemaphore() throws InterruptedException {
         final int BUFF_SIZE = 10;
         SimpleSemaphore mutex = new SimpleSemaphore(1);
         SimpleSemaphore filledSemaphore = new SimpleSemaphore(BUFF_SIZE);

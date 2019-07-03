@@ -33,7 +33,7 @@ public class JucTaskTests {
         final long timeConsumedMax = 1200;
         long startTime = System.currentTimeMillis();
 
-        Runnable runnables[] = new Runnable[nthread];
+        Runnable[] runnables = new Runnable[nthread];
         for (int i=0; i<nthread; ++i) {
             int ii = i;
             runnables[i] = new Runnable() {
@@ -52,7 +52,7 @@ public class JucTaskTests {
 
         ExecutorService executorService = Executors.newFixedThreadPool(nthread);
 
-        Future futures[] = new Future[nthread];
+        Future[] futures = new Future[nthread];
         for (int i=0; i<nthread; ++i) {
             futures[i] = executorService.submit(runnables[i]);
         }
@@ -73,7 +73,7 @@ public class JucTaskTests {
         final long timeConsumedMax = 1200;
         long startTime = System.currentTimeMillis();
 
-        Callable<Integer> calllables[] = new Callable[nthread];
+        Callable<Integer>[] calllables = new Callable[nthread];
         for (int i=0; i<nthread; ++i) {
             int ii = i;
             calllables[i] = new Callable() {
@@ -93,7 +93,7 @@ public class JucTaskTests {
 
         ExecutorService executorService = Executors.newFixedThreadPool(nthread);
 
-        Future<Integer> futures[] = new Future[nthread];
+        Future<Integer>[] futures = new Future[nthread];
         for (int i=0; i<nthread; ++i) {
             futures[i] = executorService.submit(calllables[i]);
         }

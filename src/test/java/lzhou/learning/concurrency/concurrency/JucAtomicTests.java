@@ -139,7 +139,7 @@ public class JucAtomicTests {
         SpinLock spinLock = new SpinLock();
 
         List<Integer> orderList = new ArrayList(steps * 2);
-        Callable<Integer> callables[] = new Callable[nthreads];
+        Callable<Integer>[] callables = new Callable[nthreads];
         for (int i = 0; i < nthreads; ++i) {
             int ii = i + 1;
             callables[i] = new Callable() {

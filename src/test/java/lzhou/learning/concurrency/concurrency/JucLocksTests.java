@@ -5,13 +5,8 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.*;
 
 public class JucLocksTests {
     private long value = 0;
@@ -47,13 +42,16 @@ public class JucLocksTests {
             executorService.execute(runnable);
         }
         executorService.shutdown();
-        executorService.awaitTermination(10, TimeUnit.SECONDS);
+
+        boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
+
         System.out.println("Value = "+value);
         Assert.assertEquals(10*10000, value);
     }
 
     @Test
-    public void testBufferWithSemaphore() throws InterruptedException {
+    public void testProducerConsumerWithSemaphore() throws InterruptedException {
         final int BUFF_SIZE = 10;
         Semaphore mutex = new Semaphore(1);
         Semaphore empty = new Semaphore(BUFF_SIZE);
@@ -69,8 +67,8 @@ public class JucLocksTests {
                     mutex.acquire();
                     buffer.offer(i);
                     System.out.println("Produced : "+i);
-                    mutex.release();
                     filled.release();
+                    mutex.release();
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -85,8 +83,8 @@ public class JucLocksTests {
                     int tmp = buffer.poll();
                     result.offer(tmp);
                     System.out.println("Consumed : "+tmp);
-                    mutex.release();
                     empty.release();
+                    mutex.release();
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -176,5 +174,223 @@ public class JucLocksTests {
 
         System.out.println("MaxReaders = " + maxReaders);
         Assert.assertTrue(maxReaders>=1);
+    }
+
+    @Test
+    public void testProducerConsumerWithCondition() throws InterruptedException {
+        final int BUFF_SIZE = 10;
+        Lock lock = new ReentrantLock();
+        Condition filledCondition = lock.newCondition();
+        Condition emptyCondition = lock.newCondition();
+        Queue<Long> buffer = new LinkedList<>();
+        Queue<Long> result = new LinkedList<>();
+
+        Runnable producer = () -> {
+            for (int i=0; i<10000; ++i) {
+                lock.lock();
+                while (buffer.size()==BUFF_SIZE) {
+                    try {
+                        filledCondition.await();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                buffer.offer((long)i);
+                System.out.println("Produced : "+i);
+                emptyCondition.signalAll();
+                lock.unlock();
+            }
+        };
+
+        Runnable consumer = () -> {
+            for (int i=0; i<10000; ++i) {
+                lock.lock();
+                while (buffer.size()==0) {
+                    try {
+                        emptyCondition.await();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                long tmp = buffer.poll();
+                result.offer(tmp);
+                System.out.println("Consumer : "+tmp);
+                filledCondition.signalAll();
+                lock.unlock();
+            }
+        };
+
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+        executorService.execute(producer);
+        executorService.execute(consumer);
+        executorService.shutdown();
+        boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
+        int size = result.size();
+        for (int i=0; i<size; ++i) {
+            long tmp = result.poll().longValue();
+            Assert.assertEquals(i, tmp);
+        }
+    }
+
+    private static void latchAwait(CountDownLatch countDownLatch) {
+        boolean awaitDone = false;
+        while (!awaitDone) {
+            try {
+                countDownLatch.await();
+                awaitDone = true;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    @Test
+    public void testDeadLockWithCountDownLatch() throws InterruptedException {
+        final int NUM_PHILOSOPHERS = 5;
+        CountDownLatch step1Latch = new CountDownLatch(NUM_PHILOSOPHERS);
+        CountDownLatch step2Latch = new CountDownLatch(NUM_PHILOSOPHERS);
+        CountDownLatch exitLatch = new CountDownLatch(NUM_PHILOSOPHERS);
+
+        Lock[] chopsticks = new ReentrantLock[NUM_PHILOSOPHERS];
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            chopsticks[i] = new ReentrantLock();
+        }
+
+        Runnable[] dinningPhilosophers = new Runnable[NUM_PHILOSOPHERS];
+
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            int ii = i;
+            dinningPhilosophers[i] = () -> {
+                int left = ii;
+                step1Latch.countDown();
+                latchAwait(step1Latch);
+                System.out.println("Philosopher " + ii + ": Acquiring left ["+left+"] chopstick.");
+                chopsticks[left].lock();
+                System.out.println("Philosopher " + ii + ": Left chopstick ["+left+"] acquired.");
+
+                step2Latch.countDown();
+                latchAwait(step2Latch);
+                int right = (ii+1)%NUM_PHILOSOPHERS;
+                System.out.println("Philosopher " + ii + ": Acquiring right ["+right+"] chopstick.");
+                chopsticks[right].lock();
+                System.out.println("Philosopher " + ii + ": Right chopstick ["+right+"] acquired.");
+                System.out.println("Philosopher " + ii + ": Do work.");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println("Philosopher " + ii + ": Done.");
+                chopsticks[left].unlock();
+                chopsticks[right].unlock();
+                exitLatch.countDown();
+            };
+        }
+
+        ExecutorService executorService = Executors.newFixedThreadPool(NUM_PHILOSOPHERS);
+
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            executorService.execute(dinningPhilosophers[i]);
+        }
+        boolean normalExit = exitLatch.await(10, TimeUnit.SECONDS);
+        Assert.assertFalse(normalExit);
+        Assert.assertEquals(NUM_PHILOSOPHERS, exitLatch.getCount());
+    }
+
+    @Test
+    public void testLiveLockWithCountDownLatch() throws InterruptedException {
+        final int NUM_PHILOSOPHERS = 5;
+        final int NUM_TRIES = 100;
+        CountDownLatch[] acquireLeftLatches = new CountDownLatch[NUM_TRIES];
+        for (int i=0; i<NUM_TRIES; ++i) {
+            acquireLeftLatches[i] = new CountDownLatch(NUM_PHILOSOPHERS);
+        }
+        CountDownLatch[] acquireRightLatches = new CountDownLatch[NUM_TRIES];
+        for (int i=0; i<NUM_TRIES; ++i) {
+            acquireRightLatches[i] = new CountDownLatch(NUM_PHILOSOPHERS);
+        }
+        CountDownLatch[] releaseLeftLatches = new CountDownLatch[NUM_TRIES];
+        for (int i=0; i<NUM_TRIES; ++i) {
+            releaseLeftLatches[i] = new CountDownLatch(NUM_PHILOSOPHERS);
+        }
+        CountDownLatch[] continueLatches = new CountDownLatch[NUM_TRIES];
+        for (int i=0; i<NUM_TRIES; ++i) {
+            continueLatches[i] = new CountDownLatch(NUM_PHILOSOPHERS);
+        }
+        CountDownLatch exitLatch = new CountDownLatch(NUM_PHILOSOPHERS);
+        CountDownLatch giveUpLatch = new CountDownLatch(NUM_PHILOSOPHERS);
+
+        Lock[] chopsticks = new ReentrantLock[NUM_PHILOSOPHERS];
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            chopsticks[i] = new ReentrantLock();
+        }
+
+        Runnable[] dinningPhilosophers = new Runnable[NUM_PHILOSOPHERS];
+
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            int ii = i;
+            dinningPhilosophers[i] = () -> {
+                int left = ii;
+                int right = (ii+1)%NUM_PHILOSOPHERS;
+
+                boolean bothAcquired = false;
+                int tries = 0;
+                while (!bothAcquired) {
+                    System.out.println("Philosopher " + ii + ": Tries = "+ tries);
+                    acquireLeftLatches[tries].countDown();
+                    latchAwait(acquireLeftLatches[tries]);
+                    System.out.println("Philosopher " + ii + ": Acquiring left [" + left + "] chopstick.");
+                    chopsticks[left].lock();
+                    System.out.println("Philosopher " + ii + ": Left chopstick [" + left + "] acquired.");
+
+                    acquireRightLatches[tries].countDown();
+                    latchAwait(acquireRightLatches[tries]);
+
+                    System.out.println("Philosopher " + ii + ": Acquiring right [" + right + "] chopstick.");
+                    boolean rightAcquired = chopsticks[right].tryLock();
+
+                    releaseLeftLatches[tries].countDown();
+                    latchAwait(releaseLeftLatches[tries]);
+                    if (!rightAcquired) {
+                        System.out.println("Philosopher " + ii + ": Releasing left [" + left + "] chopstick.");
+                        chopsticks[left].unlock();
+                        continueLatches[tries].countDown();
+                        latchAwait(continueLatches[tries]);
+                        tries += 1;
+                        if (tries == NUM_TRIES) {
+                            System.out.println("Philosopher " + ii + ": Giving up.");
+                            giveUpLatch.countDown();
+                            return;
+                        }
+                        continue;
+                    } else {
+                        System.out.println("Philosopher " + ii + ": Right chopstick [" + right + "] acquired.");
+                        bothAcquired = true;
+                    }
+                }
+
+                System.out.println("Philosopher " + ii + ": Do work.");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println("Philosopher " + ii + ": Done.");
+                chopsticks[left].unlock();
+                chopsticks[right].unlock();
+                exitLatch.countDown();
+            };
+        }
+
+        ExecutorService executorService = Executors.newFixedThreadPool(NUM_PHILOSOPHERS);
+
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            executorService.execute(dinningPhilosophers[i]);
+        }
+        boolean normalExit = giveUpLatch.await(5, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
+        Assert.assertEquals(NUM_PHILOSOPHERS, exitLatch.getCount());
+        Assert.assertEquals(0, giveUpLatch.getCount());
     }
 }
