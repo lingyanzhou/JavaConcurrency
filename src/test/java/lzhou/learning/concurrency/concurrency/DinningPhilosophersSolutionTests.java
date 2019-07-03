@@ -88,7 +88,7 @@ public class DinningPhilosophersSolutionTests {
                 System.out.println("Philosopher " + ii + ": Acquiring second ["+second+"] chopstick.");
                 chopsticks[second].lock();
                 System.out.println("Philosopher " + ii + ": Second chopstick ["+second+"] acquired.");
-                System.out.println("Philosopher " + ii + ": Do work.");
+                System.out.println("Philosopher " + ii + ": Doing work.");
                 System.out.println("Philosopher " + ii + ": Done.");
                 chopsticks[first].unlock();
                 chopsticks[second].unlock();
@@ -102,6 +102,86 @@ public class DinningPhilosophersSolutionTests {
         }
         executorService.shutdown();
         boolean normalExit = executorService.awaitTermination(10, TimeUnit.SECONDS);
+        Assert.assertTrue(normalExit);
+    }
+
+    private static class Chopstick {
+        private int number;
+        private int owner;
+        private boolean isDirty=true;
+        public Chopstick(int number, int owner) {
+            this.number = number;
+            this.owner = owner;
+            this.isDirty = true;
+        }
+        public synchronized void setOwner(int owner) {
+            if (isDirty) {
+                this.owner = owner;
+                isDirty = false;
+            } else {
+                try {
+                    System.out.println("Waiting for chopstick #"+number);
+                    this.wait();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        public synchronized void isDirty(boolean isDirty) {
+            this.isDirty = isDirty;
+            if (this.isDirty) {
+                System.out.println("Make dirty chopstick #"+number);
+                this.notifyAll();
+            }
+        }
+    }
+
+    /**
+     * @Description: Chandy / Misra solution
+     *
+     * [The dinning philosophers problem](https://www.eecis.udel.edu/~cshen/361/Notes/chandy.pdf)
+     *
+     * @author: lingy
+     * @Date: 2019-07-03 18:15:34
+     * @param:
+     * @return: void
+     */
+    @Test
+    public void testChandyMisraSolution() throws InterruptedException {
+        final int LOOP = 1000;
+        final int NUM_PHILOSOPHERS = 5;
+        Chopstick[] chopsticks = new Chopstick[NUM_PHILOSOPHERS];
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            chopsticks[i] = new Chopstick(i, Math.min(i, (i+1)%NUM_PHILOSOPHERS));
+        }
+        Runnable[] dinningPhilosophers = new Runnable[NUM_PHILOSOPHERS];
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            int ii = i;
+            dinningPhilosophers[i] = () -> {
+                Chopstick leftChopstick = chopsticks[ii];
+                Chopstick rightChopstick = chopsticks[(ii+1)%NUM_PHILOSOPHERS];
+
+                for (int j=0; j<LOOP; ++j) {
+                    System.out.println("Philosopher "+ii+": Thinking.");
+                    System.out.println("Philosopher "+ii+": Requesting chopstick #"+leftChopstick.number);
+                    leftChopstick.setOwner(ii);
+                    System.out.println("Philosopher "+ii+": Requesting chopstick #"+rightChopstick.number);
+                    rightChopstick.setOwner(ii);
+                    System.out.println("Philosopher "+ii+":Doing work.");
+                    System.out.println("Philosopher "+ii+":Done.");
+                    leftChopstick.isDirty(true);
+                    rightChopstick.isDirty(true);
+                }
+            };
+        }
+
+        ExecutorService executorService = Executors.newFixedThreadPool(NUM_PHILOSOPHERS);
+
+        for (int i=0; i<NUM_PHILOSOPHERS; ++i) {
+            executorService.execute(dinningPhilosophers[i]);
+        }
+        executorService.shutdown();
+        boolean normalExit = executorService.awaitTermination(50, TimeUnit.SECONDS);
         Assert.assertTrue(normalExit);
     }
 }
