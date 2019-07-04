@@ -2,8 +2,10 @@ package lzhou.learning.concurrency.concurrency;
 
 import org.junit.Assert;
 import org.junit.Test;
+import sun.security.acl.WorldGroupImpl;
 
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @Description: Java并发框架 java.util.concurrent
@@ -148,7 +150,7 @@ public class JucTaskTests {
      */
 
     @Test()
-    public void testFutureTaskCancelling() throws ExecutionException, InterruptedException {
+    public void testFutureTaskCancellation() throws ExecutionException, InterruptedException {
         final int sleep = 10000;
 
         Integer expected = ThreadLocalRandom.current().nextInt();
@@ -172,5 +174,33 @@ public class JucTaskTests {
         }
         Assert.assertTrue(futureTask.isDone());
         Assert.assertTrue(futureTask.isCancelled());
+    }
+
+    /**
+     * @Description: CompletableFuture implements / extends CompletionStage and Future.
+     *   - Offers functional interface.
+     *   - Uses callback functions to process intermediate results.
+     *   - Can combine Future results.
+     *
+     *   [CompletableFuture使用详解](https://www.jianshu.com/p/6bac52527ca4)
+     *
+     * @author: lingy
+     * @Date: 2019-07-04 16:39:10
+     * @param: null
+     * @return:
+     */
+    @Test
+    public void testCompletableFuture() throws ExecutionException, InterruptedException {
+        CompletableFuture<String> world = CompletableFuture
+                .supplyAsync(()->"world");
+        CompletableFuture<String> helloWorld = CompletableFuture
+                .supplyAsync(()-> "Hello")
+                .thenApply(String::toUpperCase)
+                .thenCombine(world.toCompletableFuture(),
+                        (s1, s2) -> s1 + " " + s2)
+                .whenComplete((s, e)->System.out.println("Child Thread: " + s));
+        helloWorld.join();
+        System.out.println("Main Thread: " + helloWorld.get());
+        Assert.assertEquals("HELLO world", helloWorld.get());
     }
 }
